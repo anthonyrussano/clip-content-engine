@@ -7,7 +7,10 @@ import urllib.request
 from typing import Any
 from urllib.parse import urlparse
 
-import engine
+try:
+    from . import engine
+except ImportError:  # standalone module install
+    import engine
 
 RUBRIC = ("Score every candidate from 1 to 5 on hook, completeness, standalone, "
           "and visual. Visual means potential suggested by the transcript ONLY; "
