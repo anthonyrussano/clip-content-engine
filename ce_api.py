@@ -7,8 +7,12 @@ import time
 from pathlib import Path
 from typing import Any
 
-import engine
-from llm_ranking import rank_moments
+try:
+    from . import engine
+    from .llm_ranking import rank_moments
+except ImportError:  # standalone module install
+    import engine
+    from llm_ranking import rank_moments
 
 
 def load_segments(transcript_path: str) -> list[dict[str, Any]]:
