@@ -120,6 +120,8 @@ def _resolve_out_dir(out_dir: Optional[str]) -> str:
     base = _plugin_work_dir()
     if not out_dir:
         return str(Path(tempfile.mkdtemp(prefix="content-engine-", dir=str(base))))
+    if re.match(r"^[A-Za-z]:[/\\]", str(out_dir)):
+        raise ValueError("Windows drive paths are not allowed as out_dir")
     requested = Path(str(out_dir))
     if not requested.is_absolute():
         requested = base / requested
