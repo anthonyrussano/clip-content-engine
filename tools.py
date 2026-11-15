@@ -78,7 +78,10 @@ def _handle_fetch_transcript(args: dict, **kw) -> str:
 def _handle_score_moments(args: dict, **kw) -> str:
     def run():
         segments = _load_segments(args)
-        from ce_api import score_clips
+        try:
+            from .ce_api import score_clips
+        except ImportError:
+            from ce_api import score_clips
         clips, _scoring = score_clips(
             segments,
             min_duration=float(args.get("min_duration", 45)),
@@ -150,7 +153,10 @@ def _handle_run(args: dict, **kw) -> str:
         platforms = [p.strip() for p in platforms.split(",") if p.strip()]
 
     def run():
-        from ce_api import run_pipeline
+        try:
+            from .ce_api import run_pipeline
+        except ImportError:
+            from ce_api import run_pipeline
         return run_pipeline(
             url,
             count=int(args.get("count", 6)),
