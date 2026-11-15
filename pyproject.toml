@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "clip-content-engine"
+version = "0.2.0"
+description = "Agent-neutral YouTube clip discovery, ranking and social drafts"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "PXMichael and contributors"}]
+dependencies = ["yt-dlp>=2025.1.0"]
+
+[project.optional-dependencies]
+mcp = ["mcp>=1.8,<2"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+clip-content-engine = "ce_cli:main"
+
+[tool.setuptools]
+py-modules = ["engine", "tools", "llm_ranking", "ce_api", "ce_cli", "mcp_server"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
