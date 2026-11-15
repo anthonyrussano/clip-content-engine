@@ -85,7 +85,27 @@ def _hermes_home() -> Path:
 
 
 def _plugin_work_dir() -> Path:
-    base = (_hermes_home() / "plugin-data" / "content-engine").resolve()
+    """Return a private work directory without requiring a Hermes installation.
+
+    CONTENT_ENGINE_HOME has priority for standalone CLI/MCP use. Existing
+    Hermes installations retain their original plugin-data location.
+    """
+    custom = os.environ.get("CONTENT_ENGINE_HOME")
+    if custom:
+        base = Path(custom).expanduser().resolve()
+    elif os.environ.get("HERMES_HOME"):
+        base = (_hermes_home() / "plugin-data" / "content-engine").resolve()
+    else:
+        try:
+            import hermes_constants
+        except ImportError:
+            if os.name == "nt":
+                base = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "clip-content-engine"
+            else:
+                base = Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))) / "clip-content-engine"
+            base = base.resolve()
+        else:
+            base = (Path(hermes_constants.get_hermes_home()) / "plugin-data" / "content-engine").resolve()
     base.mkdir(parents=True, exist_ok=True)
     return base
 
