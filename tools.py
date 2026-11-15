@@ -78,12 +78,14 @@ def _handle_fetch_transcript(args: dict, **kw) -> str:
 def _handle_score_moments(args: dict, **kw) -> str:
     def run():
         segments = _load_segments(args)
-        clips = engine.score_moments(
+        from ce_api import score_clips
+        clips, _scoring = score_clips(
             segments,
             min_duration=float(args.get("min_duration", 45)),
             max_duration=float(args.get("max_duration", 60)),
             count=int(args.get("count", 6)),
             stride=float(args.get("stride", 60)),
+            llm_model=args.get("llm_model") or None,
         )
         return [
             {
@@ -148,13 +150,15 @@ def _handle_run(args: dict, **kw) -> str:
         platforms = [p.strip() for p in platforms.split(",") if p.strip()]
 
     def run():
-        return engine.run(
+        from ce_api import run_pipeline
+        return run_pipeline(
             url,
             count=int(args.get("count", 6)),
             platforms=platforms,
             out_dir=args.get("out_dir") or None,
             min_duration=float(args.get("min_duration", 45)),
             max_duration=float(args.get("max_duration", 60)),
+            llm_model=args.get("llm_model") or None,
         )
     return _dispatch(run, "ce_run", "Failed to run the pipeline")
 
@@ -186,6 +190,7 @@ SCORE_MOMENTS_SCHEMA = {
             "max_duration": {"type": "number", "description": "Maximum clip length in seconds. Default 60."},
             "count": {"type": "integer", "description": "How many clips to return. Default 6."},
             "stride": {"type": "number", "description": "Candidate spacing in seconds. Default 60."},
+            "llm_model": {"type": "string", "description": "Optional model ID for transcript-aware local LLM ranking. Configure CONTENT_ENGINE_LLM_BASE_URL."},
         },
         "required": [],
     },
@@ -234,6 +239,7 @@ RUN_SCHEMA = {
             "out_dir": {"type": "string", "description": "Optional working directory."},
             "min_duration": {"type": "number", "description": "Minimum clip length in seconds. Default 45."},
             "max_duration": {"type": "number", "description": "Maximum clip length in seconds. Default 60."},
+            "llm_model": {"type": "string", "description": "Optional model ID for local LLM ranking. Configure CONTENT_ENGINE_LLM_BASE_URL."},
         },
         "required": ["url"],
     },
