@@ -58,18 +58,19 @@ def ce_write_copy(
 def ce_cut_clips(
     video_path: str, clips: list[dict[str, Any]],
     transcript_path: str = "", out_dir: str = "",
-    subs: bool = True, framing: str = "auto",
+    subs: bool = True, framing: str = "auto", faces: str = "auto",
 ) -> list[dict[str, Any]]:
     """Render selected clips from a local source video using ffmpeg.
 
     Portrait framing: "auto" tracks speakers and fits slides/animation,
     "track" always follows motion, "fit" shows the whole frame. A clip's own
-    crop_x (0-1) or framing key overrides it.
+    crop_x (0-1) or framing key overrides it. faces="auto" follows detected
+    faces when the faces extra is installed; "off" uses motion only.
     """
     segments = ce_api.load_segments(transcript_path) if transcript_path else None
     return engine.cut_clips(
         video_path, clips, out_dir=out_dir or None, segments=segments, subs=subs,
-        default_framing=framing,
+        default_framing=framing, faces=faces,
     )
 
 

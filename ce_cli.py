@@ -101,6 +101,9 @@ def build_parser() -> argparse.ArgumentParser:
     cut.add_argument("--framing", choices=engine.FRAMINGS, default="auto",
                      help="Portrait framing when a clip sets no crop_x: auto (track speakers, "
                           "fit slides and animation), track, or fit")
+    cut.add_argument("--faces", choices=("auto", "off"), default="auto",
+                     help="Follow detected faces in portrait clips when the faces extra is "
+                          "installed (auto), or plan framing from motion only (off)")
 
     sub.add_parser("mcp", help="Launch the optional local stdio MCP server")
     return parser
@@ -141,6 +144,7 @@ def execute(args: argparse.Namespace):
         return engine.cut_clips(
             args.video_path, clips, out_dir=args.out_dir,
             segments=segments, subs=not args.no_subs, default_framing=args.framing,
+            faces=args.faces,
         )
     raise ValueError("Unsupported command: " + args.command)
 

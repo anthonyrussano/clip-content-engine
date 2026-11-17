@@ -690,6 +690,7 @@ def cut_clips(
     segments: Optional[List[Dict[str, Any]]] = None,
     subs: bool = True,
     default_framing: str = "auto",
+    faces: str = "auto",
 ) -> List[Dict[str, Any]]:
     """Cut clips from a source video with ffmpeg, burning subtitles.
 
@@ -698,8 +699,12 @@ def cut_clips(
     ``framing`` (per clip, or ``default_framing``) steers auto mode: "auto"
     tracks speakers and fits slides and full-frame animation, "track" always
     follows motion, and "fit" shows the whole frame over a blurred copy.
+    ``faces`` "auto" uses face detection when the faces extra is installed;
+    "off" plans framing from motion only.
     """
     ffmpeg = _ffmpeg()
+    if faces not in ("auto", "off"):
+        raise ValueError("faces must be 'auto' or 'off'")
     video_path = str(Path(video_path).expanduser().resolve(strict=True))
     if not clips or not isinstance(clips, list):
         raise ValueError("clips must be a nonempty array")
@@ -750,10 +755,11 @@ def cut_clips(
         shots: List[Dict[str, Any]] = []
         if orient == "v":
             if item["crop_x"] == "auto":
-                shots = _auto_crop_shots(video_path, start, dur, source, framing=item["framing"])
+                shots = _auto_crop_shots(video_path, start, dur, source, framing=item["framing"],
+                                         faces=faces == "auto")
             else:
                 x = round(float(item["crop_x"]), 3)
-                shots = [{"t": 0.0, "x": x, "mode": "crop", "path": [(0.0, x)]}]
+                shots = [{"t": 0.0, "x": x, "mode": "crop", "subject": "manual", "path": [(0.0, x)]}]
             crop_used = shots[0]["x"] if len(shots) == 1 else _crop_median(shots, dur)
             graph = _portrait_graph(shots)
         else:
@@ -784,9 +790,12 @@ def cut_clips(
         }
         if crop_used is not None:
             row["crop_x"] = crop_used
-            if len(shots) > 1 or shots[0]["mode"] != "crop" or len(shots[0]["path"]) > 1:
+            if item["crop_x"] == "auto":
                 row["crop_shots"] = [{"t": sh["t"], "x": sh["x"], "mode": sh["mode"],
+                                      "subject": sh.get("subject", "motion"),
                                       "moves": max(0, len(sh["path"]) - 1)} for sh in shots]
+            if shots[0].get("warning"):
+                row["warning"] = shots[0]["warning"]
         results.append(row)
     return results
 
@@ -880,7 +889,7 @@ _FULL_FRAME_SPREAD = 0.5
 
 def _auto_crop_shots(video_path: str, start: float, dur: float, source: Dict[str, Any],
                      fps: int = 6, min_shot: float = 1.0,
-                     framing: str = "auto") -> List[Dict[str, Any]]:
+                     framing: str = "auto", faces: bool = True) -> List[Dict[str, Any]]:
     """Plan portrait framing for each camera shot in a clip.
 
     Samples small grayscale frames. A large whole-frame change marks a camera
@@ -891,6 +900,11 @@ def _auto_crop_shots(video_path: str, start: float, dur: float, source: Dict[str
     still graphics) are marked "fit" so the whole frame is shown, and so are
     shots whose motion is spread across the frame (animation, screencasts)
     unless framing="track". framing="fit" fits every shot.
+
+    With faces=True and the optional faces extra installed, a shot where the
+    YuNet detector finds a face in enough sampled frames follows the largest
+    face instead of motion, and is never fitted for wide motion spread. Each
+    shot reports "subject": "face", "motion" or "none" (fitted).
 
     Returns [{"t": shot start, "x": median centre, "mode": "crop"|"fit",
     "path": [(t, x), ...]}], always starting at t=0. Times are seconds from
@@ -955,25 +969,57 @@ def _auto_crop_shots(video_path: str, start: float, dur: float, source: Dict[str
             # Centre on the motion inside the window, not the window edge, so ties don't bias left.
             span = range(best_x, best_x + win)
             votes[-1].append((t, (sum(energy[x] * (x + 0.5) for x in span) / best) / cols))
+    face_list: Optional[List[Any]] = None
+    face_warning: Optional[str] = None
+    face_fps = 3
+    if faces and framing != "fit":
+        face_mod = None
+        try:
+            from . import faces as face_mod
+        except ImportError:
+            try:
+                import faces as face_mod
+            except ImportError:  # optional module missing from an older install: motion only
+                face_warning = "face detection module not installed"
+        if face_mod is not None:
+            face_list, face_warning = face_mod.try_face_votes(video_path, start, dur, source)
+    dead_zone = keep * 0.22
     shots: List[Dict[str, Any]] = []
     for i, (t0, shot_votes) in enumerate(zip(cuts, votes)):
         t1 = cuts[i + 1] if i + 1 < len(cuts) else dur
+        static = len(shot_votes) < 3 or len(shot_votes) < 0.1 * max(pairs[i], 1)
+        if face_list and framing != "fit":
+            shot_faces = [(t, x) for t, x in face_list if t0 <= t < t1]
+            expected = max(1.0, (t1 - t0) * face_fps)
+            # Still shots (slides) need a face in most frames, so a photo on a slide stays fitted.
+            needed = max(3, (0.6 if static else 0.3) * expected)
+            if len(shot_faces) >= needed:
+                fx = sorted(x for _, x in shot_faces)
+                median = round(fx[len(fx) // 2], 3)
+                shots.append({"t": round(t0, 2), "x": median, "mode": "crop", "subject": "face",
+                              "path": _camera_path(shot_faces, t0, t1, median, dead_zone)})
+                continue
         xs = sorted(x for _, x in shot_votes)
         spread = (xs[int(len(xs) * 0.9)] - xs[int(len(xs) * 0.1)]) if len(xs) >= 10 else 0.0
-        if (framing == "fit" or len(shot_votes) < 3 or len(shot_votes) < 0.1 * max(pairs[i], 1)
+        if (framing == "fit" or static
                 or (framing == "auto" and spread > _FULL_FRAME_SPREAD)):
-            # Too little motion to find a subject: show the whole frame.
-            shots.append({"t": round(t0, 2), "x": 0.5, "mode": "fit", "path": [(round(t0, 2), 0.5)]})
+            # No subject to follow (slide, still frame or full-frame animation): show it all.
+            shots.append({"t": round(t0, 2), "x": 0.5, "mode": "fit", "subject": "none",
+                          "path": [(round(t0, 2), 0.5)]})
             continue
         median = round(xs[len(xs) // 2], 3)
-        path = _camera_path(shot_votes, t0, t1, median, dead_zone=keep * 0.22)
-        shots.append({"t": round(t0, 2), "x": median, "mode": "crop", "path": path})
+        path = _camera_path(shot_votes, t0, t1, median, dead_zone=dead_zone)
+        shots.append({"t": round(t0, 2), "x": median, "mode": "crop", "subject": "motion",
+                      "path": path})
     merged: List[Dict[str, Any]] = []
     for sh in shots:  # neighbouring "fit" shots look identical; join them
         if merged and sh["mode"] == "fit" and merged[-1]["mode"] == "fit":
             continue
         merged.append(sh)
-    return merged or centre_only
+    merged = merged or centre_only
+    if face_warning:
+        merged[0]["warning"] = face_warning
+    return merged
 
 
 def _camera_path(votes: List[Any], t0: float, t1: float, start_x: float,
