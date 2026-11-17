@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 
 import ce_api
 import engine
+import transcribe
 
 
 def _scoring_args(parser: argparse.ArgumentParser) -> None:
@@ -21,6 +23,21 @@ def _scoring_args(parser: argparse.ArgumentParser) -> None:
                         help="Fail instead of falling back to heuristic scoring")
     parser.add_argument("--allow-remote-llm", action="store_true",
                         help="Allow transcript submission to an HTTPS remote model")
+    parser.add_argument("--llm-pool", type=int,
+                        help="Most candidate windows sent to the model (default: all, up to 120)")
+    parser.add_argument("--llm-batch", type=int, default=12,
+                        help="Candidates per model request (default 12)")
+    parser.add_argument("--no-llm-refine", action="store_true",
+                        help="Keep the scored windows instead of letting the model "
+                             "choose each clip's start and end sentences")
+
+
+def _transcript_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--transcriber", choices=ce_api.TRANSCRIBERS, default="captions",
+                        help="captions (YouTube), whisper (local audio transcription), "
+                             "or auto (captions, then Whisper if they fail)")
+    parser.add_argument("--whisper-model", default=transcribe.DEFAULT_WHISPER_MODEL,
+                        help="faster-whisper model, e.g. base.en, small.en, large-v3-turbo")
 
 
 def _score_kwargs(args: argparse.Namespace) -> dict:
@@ -29,6 +46,7 @@ def _score_kwargs(args: argparse.Namespace) -> dict:
         max_duration=args.max_duration, stride=args.stride,
         llm_model=args.llm_model, llm_base_url=args.llm_url,
         llm_required=args.llm_required, allow_remote_llm=args.allow_remote_llm,
+        llm_pool=args.llm_pool, llm_batch=args.llm_batch, llm_refine=not args.no_llm_refine,
     )
 
 
@@ -41,6 +59,19 @@ def build_parser() -> argparse.ArgumentParser:
     fetch = sub.add_parser("fetch", help="Fetch YouTube captions and metadata")
     fetch.add_argument("url")
     fetch.add_argument("--out-dir")
+    _transcript_args(fetch)
+
+    download = sub.add_parser("download", help="Download a YouTube video (or its audio) for cutting")
+    download.add_argument("url")
+    download.add_argument("--out-dir")
+    download.add_argument("--audio-only", action="store_true")
+    download.add_argument("--max-height", type=int, default=1080)
+
+    trans = sub.add_parser("transcribe", help="Transcribe a local audio/video file with Whisper")
+    trans.add_argument("media_path")
+    trans.add_argument("--out-dir")
+    trans.add_argument("--whisper-model", default=transcribe.DEFAULT_WHISPER_MODEL)
+    trans.add_argument("--language", default="en")
 
     score = sub.add_parser("score", help="Score an existing transcript JSON")
     score.add_argument("transcript_path")
@@ -50,6 +81,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("url")
     run.add_argument("--out-dir")
     run.add_argument("--platforms", default="x,facebook,shorts,tiktok")
+    _transcript_args(run)
     _scoring_args(run)
 
     copy = sub.add_parser("copy", help="Draft copy from text or a UTF-8 file")
@@ -66,6 +98,9 @@ def build_parser() -> argparse.ArgumentParser:
     cut.add_argument("--transcript-file")
     cut.add_argument("--out-dir")
     cut.add_argument("--no-subs", action="store_true")
+    cut.add_argument("--framing", choices=engine.FRAMINGS, default="auto",
+                     help="Portrait framing when a clip sets no crop_x: auto (track speakers, "
+                          "fit slides and animation), track, or fit")
 
     sub.add_parser("mcp", help="Launch the optional local stdio MCP server")
     return parser
@@ -73,7 +108,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 def execute(args: argparse.Namespace):
     if args.command == "fetch":
-        return ce_api.fetch_summary(args.url, out_dir=args.out_dir)
+        return ce_api.fetch_summary(args.url, out_dir=args.out_dir, transcriber=args.transcriber,
+                                    whisper_model=args.whisper_model)
+    if args.command == "download":
+        return transcribe.download_media(args.url, out_dir=args.out_dir, audio_only=args.audio_only,
+                                         max_height=args.max_height)
+    if args.command == "transcribe":
+        return ce_api.transcribe_summary(args.media_path, out_dir=args.out_dir,
+                                         whisper_model=args.whisper_model, language=args.language)
     if args.command == "score":
         segments = ce_api.load_segments(args.transcript_path)
         clips, scoring = ce_api.score_clips(segments, **_score_kwargs(args))
@@ -82,6 +124,7 @@ def execute(args: argparse.Namespace):
         return ce_api.run_pipeline(
             args.url, out_dir=args.out_dir,
             platforms=[p.strip() for p in args.platforms.split(",") if p.strip()],
+            transcriber=args.transcriber, whisper_model=args.whisper_model,
             **_score_kwargs(args),
         )
     if args.command == "copy":
@@ -97,7 +140,7 @@ def execute(args: argparse.Namespace):
         segments = ce_api.load_segments(args.transcript_file) if args.transcript_file else None
         return engine.cut_clips(
             args.video_path, clips, out_dir=args.out_dir,
-            segments=segments, subs=not args.no_subs,
+            segments=segments, subs=not args.no_subs, default_framing=args.framing,
         )
     raise ValueError("Unsupported command: " + args.command)
 
@@ -114,8 +157,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         result = execute(args)
         print(json.dumps(result, ensure_ascii=False, indent=2))
+        if args.command == "cut" and any(row.get("error") or not row.get("output") for row in result):
+            return 1
         return 0
-    except (OSError, ValueError, RuntimeError, KeyError, TypeError) as exc:
+    except (OSError, ValueError, RuntimeError, KeyError, TypeError, subprocess.SubprocessError) as exc:
         print("clip-content-engine: " + str(exc), file=sys.stderr)
         return 1
 
