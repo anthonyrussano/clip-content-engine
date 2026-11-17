@@ -63,7 +63,19 @@ Rendering validates every clip (bounds against the source duration, unique label
 - Shots with almost no motion (slides, charts, still graphics) are shown whole over a blurred copy of the frame, so on-screen text is not cut off.
 - Shots whose motion spreads across more than half the frame width (animation, screencasts) are also shown whole.
 
-Set `"framing"` per clip, or `--framing` for the whole `cut`, to `track` (always follow motion), `fit` (always show the whole frame) or `auto`. The result reports `crop_x` (the main position) and `crop_shots` with each shot's start time, mode and number of camera moves. Subtitles are fitted to the final frame.
+Set `"framing"` per clip, or `--framing` for the whole `cut`, to `track` (always follow motion), `fit` (always show the whole frame) or `auto`. The result reports `crop_x` (the main position) and `crop_shots` with each shot's start time, mode, subject (`face`, `motion`, `none` or `manual`) and number of camera moves.
+
+### Optional face detection
+
+Motion alone cannot tell a speaker who roams the whole stage from full-frame animation. Install the `faces` extra to follow faces instead:
+
+~~~bash
+python -m pip install -e ".[faces]"
+~~~
+
+With it installed, each shot is checked with the [YuNet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet) face detector (MIT license) at three frames per second. A shot with a face in at least 30% of its frames follows the largest face, even when the speaker covers most of the stage. Still shots, such as slides, need a face in 60% of frames, so a photo on a slide stays fitted. Shots without faces use the motion rules above.
+
+On first use the engine downloads the model (about 230 KB) from a pinned OpenCV Zoo commit into `models/` in the work directory and checks its SHA-256 before use. OpenCV 5 uses `face_detection_yunet_2026may.onnx` and OpenCV 4 uses `face_detection_yunet_2023mar.onnx`. If OpenCV, the model or detection is unavailable, framing falls back to motion and the clip result includes a `warning`. Pass `--faces off`, or set `CONTENT_ENGINE_FACES=off`, to use motion only. In tests on a 75-minute talk, faces were found in every sampled frame of speaker shots and in none of 525 frames of an animated explainer. Subtitles are fitted to the final frame.
 
 ## Local Whisper transcription
 
