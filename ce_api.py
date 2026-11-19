@@ -57,13 +57,17 @@ def score_clips(
     llm_pool: int | None = None, llm_batch: int = 12, llm_refine: bool = True,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     key = os.getenv("CONTENT_ENGINE_LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
-    return rank_moments(
+    clips, scoring = rank_moments(
         segments, count=count, min_duration=min_duration,
         max_duration=max_duration, stride=stride, model=llm_model,
         base_url=llm_base_url, api_key=key, required=llm_required,
         allow_remote=allow_remote_llm, pool_size=llm_pool, batch_size=llm_batch,
         refine=llm_refine,
     )
+    scoring["selection"] = {"requested_count": count, "returned_count": len(clips),
+                            "min_duration": min_duration, "max_duration": max_duration,
+                            "stride": stride}
+    return clips, scoring
 
 
 def run_pipeline(

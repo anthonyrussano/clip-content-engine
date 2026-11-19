@@ -11,12 +11,19 @@ import ce_api
 import engine
 import transcribe
 
+SCORING_PRESETS = {
+    "standard": dict(count=6, min_duration=45, max_duration=60, stride=60),
+    "long-form": dict(count=12, min_duration=30, max_duration=90, stride=30),
+}
+
 
 def _scoring_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--count", type=int, default=6)
-    parser.add_argument("--min-duration", type=float, default=45)
-    parser.add_argument("--max-duration", type=float, default=60)
-    parser.add_argument("--stride", type=float, default=60)
+    parser.add_argument("--preset", choices=SCORING_PRESETS, default="standard",
+                        help="long-form: up to 12 clips, 30–90 seconds, scanning every 30 seconds")
+    parser.add_argument("--count", type=int, help="Maximum clips; overrides the preset")
+    parser.add_argument("--min-duration", type=float, help="Minimum candidate duration; overrides the preset")
+    parser.add_argument("--max-duration", type=float, help="Maximum candidate duration; overrides the preset")
+    parser.add_argument("--stride", type=float, help="Seconds between candidate starts; overrides the preset")
     parser.add_argument("--llm-model", help="Enable local or OpenAI-compatible model ranking")
     parser.add_argument("--llm-url", help="Default: http://127.0.0.1:1234/v1")
     parser.add_argument("--llm-required", action="store_true",
@@ -24,7 +31,7 @@ def _scoring_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--allow-remote-llm", action="store_true",
                         help="Allow transcript submission to an HTTPS remote model")
     parser.add_argument("--llm-pool", type=int,
-                        help="Most candidate windows sent to the model (default: all, up to 120)")
+                        help="Candidate limit (default 120); capped pools sample across the full timeline")
     parser.add_argument("--llm-batch", type=int, default=12,
                         help="Candidates per model request (default 12)")
     parser.add_argument("--no-llm-refine", action="store_true",
@@ -41,9 +48,10 @@ def _transcript_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _score_kwargs(args: argparse.Namespace) -> dict:
+    settings = {key: getattr(args, key) if getattr(args, key) is not None else value
+                for key, value in SCORING_PRESETS[args.preset].items()}
     return dict(
-        count=args.count, min_duration=args.min_duration,
-        max_duration=args.max_duration, stride=args.stride,
+        **settings,
         llm_model=args.llm_model, llm_base_url=args.llm_url,
         llm_required=args.llm_required, allow_remote_llm=args.allow_remote_llm,
         llm_pool=args.llm_pool, llm_batch=args.llm_batch, llm_refine=not args.no_llm_refine,
@@ -76,6 +84,16 @@ def build_parser() -> argparse.ArgumentParser:
     score = sub.add_parser("score", help="Score an existing transcript JSON")
     score.add_argument("transcript_path")
     _scoring_args(score)
+
+    prepare = sub.add_parser("prepare", help="Create editable selections from score/run JSON")
+    prepare.add_argument("scored_file")
+    prepare.add_argument("--out-dir")
+
+    gallery = sub.add_parser("gallery", help="Build a local video gallery and contact sheets")
+    gallery.add_argument("--renders-file", required=True)
+    gallery.add_argument("--clips-file", required=True)
+    gallery.add_argument("--out-dir")
+    gallery.add_argument("--verify", action="store_true", help="Decode every rendered clip to check for errors")
 
     run = sub.add_parser("run", help="Fetch, score, and draft platform copy")
     run.add_argument("url")
@@ -110,6 +128,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def execute(args: argparse.Namespace):
+    if args.command in ("prepare", "gallery"):
+        import review_batch
+        if args.command == "prepare":
+            return review_batch.prepare(args.scored_file, args.out_dir)
+        return review_batch.gallery(args.renders_file, args.clips_file, args.out_dir, args.verify)
     if args.command == "fetch":
         return ce_api.fetch_summary(args.url, out_dir=args.out_dir, transcriber=args.transcriber,
                                     whisper_model=args.whisper_model)

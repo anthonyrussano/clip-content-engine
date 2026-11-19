@@ -1,0 +1,6 @@
+#!/bin/sh
+# Run this checkout with generated artifacts kept in its ignored outputs folder.
+set -eu
+repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+export CONTENT_ENGINE_HOME="${CONTENT_ENGINE_HOME:-$repo_dir/outputs}"
+exec uv run --project "$repo_dir" --locked clip-content-engine "$@"
