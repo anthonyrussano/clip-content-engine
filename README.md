@@ -4,34 +4,54 @@ Turn a YouTube video into scored short-form clip candidates and social-media dra
 
 The pipeline downloads English captions and metadata, proposes non-overlapping clips, ranks them, and drafts text for X, Facebook, YouTube Shorts, TikTok and Instagram. Rendering mp4 files is a separate ffmpeg step. **It does not automatically post content.**
 
+## Reproduce the reviewed workflow
+
+The [Agent Wiki workflow guide](https://agent.wikip.co/clip-content-engine-reproducible-video-workflow/)
+owns the complete procedure for another video, the pinned baseline, editorial review,
+rendering and local gallery checks. The [project overview](https://agent.wikip.co/clip-content-engine-overview/)
+links the current state and benchmark evidence.
+
+The standalone CLI includes `prepare` to create editable selections from saved score
+results and `gallery --verify` to build a local review page and check rendered clips.
+Generated media and galleries stay in the ignored workspace.
+
 ## Installation
 
-Python 3.11+, ffmpeg (including ffprobe), and a supported JavaScript runtime (Deno or Node) are required. The pip package installs yt-dlp with its default dependencies, including the YouTube challenge helper. ffmpeg and the runtime must be installed on your system. The engine enables Node when Deno is unavailable. See [yt-dlp's runtime setup](https://github.com/yt-dlp/yt-dlp/wiki/EJS).
+Python 3.11+, [uv](https://docs.astral.sh/uv/), ffmpeg (including ffprobe), and a supported JavaScript runtime (Deno or Node) are required. The project installs yt-dlp with its default dependencies, including the YouTube challenge helper. ffmpeg and the runtime must be installed on your system. The engine enables Node when Deno is unavailable. See [yt-dlp's runtime setup](https://github.com/yt-dlp/yt-dlp/wiki/EJS).
 
 ~~~bash
 git clone https://github.com/anthonyrussano/clip-content-engine.git
 cd clip-content-engine
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install -e ".[mcp]"
-clip-content-engine --help
+uv sync --locked --all-extras
+./scripts/ce --help
 ~~~
 
-On Windows, activate the virtual environment with .venv\Scripts\activate instead.
+The checkout selects Python 3.13 through `.python-version`. uv manages the project environment and installs the locked dependencies; no manual activation is needed. The package still supports Python 3.11+. On Windows, use `uv run --locked --all-extras clip-content-engine` in place of `./scripts/ce`.
 
 ## Standalone CLI (no Hermes)
 
+When working in this checkout, `./scripts/ce` runs this checkout through
+`uv run --locked` and keeps generated artifacts in the gitignored `outputs/` folder. An explicit
+`CONTENT_ENGINE_HOME` still takes priority. The installed CLI retains its platform
+application-data default. See the [Agent Wiki project guide](https://agent.wikip.co/clip-content-engine-whisper-and-local-llm-benchmarks-2026-11-16/)
+for local workflows and measured results.
+
 ~~~bash
-clip-content-engine run 'https://www.youtube.com/watch?v=aircAruvnKk' --count 3
-clip-content-engine fetch 'https://www.youtube.com/watch?v=aircAruvnKk'
-clip-content-engine score /path/to/transcript.json --count 3
-clip-content-engine copy --text-file excerpt.txt --platforms x,instagram,shorts
+./scripts/ce run 'https://www.youtube.com/watch?v=aircAruvnKk' --count 3
+./scripts/ce fetch 'https://www.youtube.com/watch?v=aircAruvnKk'
+./scripts/ce score /path/to/transcript.json --count 3
+./scripts/ce copy --text-file excerpt.txt --platforms x,instagram,shorts
 ~~~
+
+For long talks, `--preset long-form` targets up to 12 clips with 30–90 second
+candidate windows and a 30-second stride. Explicit count, duration and stride
+options override the preset. Add `--llm-model` for transcript-aware ranking.
+The scoring result records the requested and returned counts and the actual settings.
 
 To render selected clips, first download your source file (subject to the rights and platform terms governing it). The file is saved as `source.mp4` in the work directory:
 
 ~~~bash
-clip-content-engine download 'https://www.youtube.com/watch?v=aircAruvnKk' --out-dir demo --max-height 1080
+./scripts/ce download 'https://www.youtube.com/watch?v=aircAruvnKk' --out-dir demo --max-height 1080
 ~~~
 
 Save clip selections to clips.json:
@@ -46,7 +66,7 @@ Save clip selections to clips.json:
 Then run:
 
 ~~~bash
-clip-content-engine cut source.mp4 --clips-file clips.json --transcript-file /path/to/transcript.json
+./scripts/ce cut source.mp4 --clips-file clips.json --transcript-file /path/to/transcript.json
 ~~~
 
 Results are JSON on stdout. Errors go to stderr. Transcripts and mp4s are written under CONTENT_ENGINE_HOME, or the platform application-data directory by default. To choose another sandbox, set CONTENT_ENGINE_HOME=/path/to/private/workspace before running.
@@ -70,7 +90,7 @@ Set `"framing"` per clip, or `--framing` for the whole `cut`, to `track` (always
 Motion alone cannot tell a speaker who roams the whole stage from full-frame animation. Install the `faces` extra to follow faces instead:
 
 ~~~bash
-python -m pip install -e ".[faces]"
+uv sync --locked --extra faces
 ~~~
 
 With it installed, each shot is checked with the [YuNet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet) face detector (MIT license) at three frames per second. A shot with a face in at least 30% of its frames follows the largest face, even when the speaker covers most of the stage. Still shots, such as slides, need a face in 60% of frames, so a photo on a slide stays fitted. Shots without faces use the motion rules above.
@@ -82,13 +102,13 @@ On first use the engine downloads the model (about 230 KB) from a pinned OpenCV 
 Install the optional extra to transcribe on your own machine with [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (CPU, int8). This works for videos without captions and avoids YouTube's caption rate limit:
 
 ~~~bash
-python -m pip install -e ".[whisper]"
+uv sync --locked --extra whisper
 # Transcribe a file you already downloaded (no further YouTube requests)
-clip-content-engine transcribe ~/.local/share/clip-content-engine/demo/source.mp4 --out-dir demo
+./scripts/ce transcribe outputs/demo/source.mp4 --out-dir demo
 # Or let fetch/run download only the original audio track and transcribe it
-clip-content-engine run 'https://www.youtube.com/watch?v=aircAruvnKk' --transcriber whisper
+./scripts/ce run 'https://www.youtube.com/watch?v=aircAruvnKk' --transcriber whisper
 # Captions first, Whisper only if captions are missing or rate limited
-clip-content-engine run 'https://www.youtube.com/watch?v=aircAruvnKk' --transcriber auto
+./scripts/ce run 'https://www.youtube.com/watch?v=aircAruvnKk' --transcriber auto
 ~~~
 
 The default model is `small.en`; pass `--whisper-model base.en` for speed or `--whisper-model large-v3-turbo` for accuracy (the model downloads from Hugging Face on first use). Audio is decoded by ffmpeg in 30-minute chunks so memory stays bounded, and faster-whisper's batched pipeline transcribes speech regions in parallel.
@@ -100,13 +120,13 @@ Measured on a 32-thread Ryzen AI Max (Strix Halo) CPU, 2026-11-16, 75-minute tal
 The default scoring is the upstream deterministic heuristic. To have an OpenAI-compatible model judge candidates based on transcript content, run a local endpoint (for example, LM Studio on port 1234 or vLLM with an OpenAI-compatible server) and specify its model identifier:
 
 ~~~bash
-clip-content-engine run 'https://www.youtube.com/watch?v=aircAruvnKk' \
+./scripts/ce run 'https://www.youtube.com/watch?v=aircAruvnKk' \
   --llm-model YOUR_LOADED_MODEL_ID \
   --llm-url http://127.0.0.1:1234/v1 \
   --count 3
 ~~~
 
-The model rates every distinct candidate window (up to 120, in batches of 12; tune with `--llm-pool` and `--llm-batch`) on four 1–5 scales: hook, completeness, standalone value, and potential for visuals. It has not seen the actual footage. The rubric marks down prayers, greetings, announcements, transitions and recaps. The keyword heuristic only orders the candidates; it no longer decides which ones the model sees.
+The model rates distinct candidate windows (up to 120 by default, in batches of at most 12; tune with `--llm-pool` and `--llm-batch`) on four 1–5 scales: hook, completeness, standalone value, and potential for visuals. It has not seen the actual footage. The rubric marks down prayers, greetings, announcements, transitions and recaps. When candidates exceed the pool limit, the engine samples representatives from bands across the full timeline. Complete candidate text is sent, including the ending; batches shrink when needed to stay within a text budget.
 
 For each winning window, a second request shows the model the numbered sentences from 45 seconds before to 45 seconds after and asks for the sentence range that makes the best standalone clip, so a story is not cut in half by the fixed window grid. The range must last from 0.75× `--min-duration` to 1.25× `--max-duration` and overlap the scored window; a model that overshoots is told the length and asked once more, and the start is kept if the end still has to be trimmed. Refined clips report `window` (the original scored range) and `refine_reason`. Pass `--no-llm-refine` to keep the scored windows. Refinement needs a punctuated transcript (Whisper or YouTube's original-language captions).
 
@@ -123,14 +143,14 @@ For shell-based use, ask the agent to run clip-content-engine commands. To insta
 For MCP-enabled agents, first install the mcp extra, then register the local stdio server:
 
 ~~~bash
-codex mcp add clip-content-engine -- clip-content-engine mcp
+codex mcp add clip-content-engine -- "$PWD/scripts/ce" mcp
 codex mcp list
 ~~~
 
 Claude Code can register the same executable:
 
 ~~~bash
-claude mcp add --transport stdio clip-content-engine -- clip-content-engine mcp
+claude mcp add --transport stdio clip-content-engine -- "$PWD/scripts/ce" mcp
 ~~~
 
 The server exposes ce_fetch_transcript, ce_score_moments, ce_write_copy, ce_cut_clips and ce_run. It is launched as a child process by the agent; no hosted service or cloud phone is involved. It does not expose an HTTP port.
@@ -158,8 +178,8 @@ Hermes commands are only needed if you use Hermes. Hermes deployments continue u
 ## Development
 
 ~~~bash
-python -m pip install -e ".[mcp,dev,whisper]"
-python -m pytest -q
+uv sync --locked --all-extras
+uv run --locked --all-extras pytest -q
 ~~~
 
 The CI workflow runs Python 3.11 and 3.13 tests, including offline LLM fallback and CLI smoke checks.

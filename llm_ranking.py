@@ -28,7 +28,7 @@ RUBRIC = ("You pick short-form social clips (about one minute) from a long talk.
           "\"standalone\": 2, \"visual\": 3}, ...]}.")
 DEFAULT_BATCH = 12        # candidates per request; ~6k prompt tokens
 DEFAULT_POOL = 120        # most candidates sent to the model per run
-_TRANSCRIPT_CHARS = 1800
+_BATCH_TRANSCRIPT_CHARS = 24000
 KEYS = ("hook", "completeness", "standalone", "visual")
 
 
@@ -52,11 +52,12 @@ def _endpoint(url: str, allow_remote: bool) -> str:
 
 
 def _candidates(segments: list[dict[str, Any]], lo: float, hi: float,
-                stride: float, count: int, pool_size: int | None = None) -> list[dict[str, Any]]:
+                stride: float, count: int, pool_size: int | None = None,
+                stats: dict | None = None) -> list[dict[str, Any]]:
     """Distinct candidate windows for the model, best heuristic scores first.
 
-    pool_size None sends every distinct window (up to DEFAULT_POOL), so the
-    keyword heuristic only orders candidates instead of hiding good ones.
+    When capped, retain the best representative from each timeline band instead
+    of letting keyword-rich sections consume the entire budget.
     """
     pool = engine._make_candidates(segments, lo, hi, stride)
     for c in pool:
@@ -70,9 +71,35 @@ def _candidates(segments: list[dict[str, Any]], lo: float, hi: float,
         ):
             continue
         selected.append(c)
-        if len(selected) >= (pool_size or DEFAULT_POOL):
-            break
+    distinct = len(selected)
+    limit = pool_size or DEFAULT_POOL
+    if distinct > limit:
+        ordered = sorted(selected, key=lambda c: c["start"])
+        selected = [max(ordered[i * distinct // limit:(i + 1) * distinct // limit],
+                        key=lambda c: c["heuristic_scores"]["total"])
+                    for i in range(limit)]
+        selected.sort(key=lambda c: c["heuristic_scores"]["total"], reverse=True)
+    if stats is not None:
+        stats.update(generated_candidate_count=len(pool), distinct_candidate_count=distinct,
+                     pool_limit=limit, pool_limited=distinct > limit,
+                     pool_sampling="timeline_bands" if distinct > limit else "all_distinct")
     return selected
+
+
+def _score_batches(pool: list[dict[str, Any]], batch_size: int):
+    """Send complete excerpts, shrinking batches instead of cutting off endings."""
+    batch, size = [], 0
+    for c in pool:
+        length = len(c["text"])
+        if length > _BATCH_TRANSCRIPT_CHARS:
+            raise ValueError("Candidate transcript is too large; reduce max_duration")
+        if batch and (len(batch) >= batch_size or size + length > _BATCH_TRANSCRIPT_CHARS):
+            yield batch
+            batch, size = [], 0
+        batch.append(c)
+        size += length
+    if batch:
+        yield batch
 
 
 REFINE_RUBRIC = (
@@ -190,7 +217,7 @@ def _scores(pool: list[dict[str, Any]], model: str, url: str,
             api_key: str | None, allow_remote: bool, timeout: float) -> dict:
     data = _chat(RUBRIC, json.dumps({"candidates": [
         {"id": c["id"], "start": c["start"], "end": c["end"],
-         "transcript": c["text"][:_TRANSCRIPT_CHARS]} for c in pool
+         "transcript": c["text"]} for c in pool
     ]}, ensure_ascii=False), model, url, api_key, allow_remote, timeout)
     rows = data["scores"]
     if not isinstance(rows, list):
@@ -239,16 +266,16 @@ def rank_moments(
             segments, min_duration, max_duration, count, stride
         ), {"mode": "heuristic"}
     try:
-        pool = _candidates(segments, min_duration, max_duration, stride, count, pool_size)
+        coverage: dict = {}
+        pool = _candidates(segments, min_duration, max_duration, stride, count, pool_size, coverage)
         if not pool:
-            return [], {"mode": "llm", "model": model, "candidate_count": 0}
+            return [], {"mode": "llm", "model": model, "candidate_count": 0, **coverage}
         url = base_url or os.getenv("CONTENT_ENGINE_LLM_BASE_URL", "http://127.0.0.1:1234/v1")
         started = time.monotonic()
         scored: dict = {}
         requests = 0
         # Batches keep each prompt well inside small local context windows.
-        for i in range(0, len(pool), batch_size):
-            batch = pool[i:i + batch_size]
+        for batch in _score_batches(pool, batch_size):
             for attempt in range(2):
                 requests += 1
                 try:
@@ -303,7 +330,7 @@ def rank_moments(
                     if any(not (c["end"] <= p["start"] or c["start"] >= p["end"]) for p in picked):
                         continue
             picked.append(c)
-        return picked, {"mode": "llm", "model": model,
+        return picked, {"mode": "llm", "model": model, **coverage,
                         "candidate_count": len(pool), "requests": requests,
                         "refined": refined, "refine_failed": refine_failed,
                         "llm_seconds": round(time.monotonic() - started, 1),
