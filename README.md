@@ -138,7 +138,7 @@ Remote model requests **transmit transcript text to that provider**. Remote endp
 
 ## Codex CLI and Claude Code
 
-For shell-based use, ask the agent to run clip-content-engine commands. To install the portable skill, copy skills/clip-content-engine/SKILL.md into ~/.agents/skills/clip-content-engine/SKILL.md for Codex or ~/.claude/skills/clip-content-engine/SKILL.md for Claude Code (or the corresponding project skills directory). The skill guides clip review, source validation and human approval.
+For shell-based use, ask the agent to run clip-content-engine commands. In this checkout, Codex discovers the skill through `.agents/skills/clip-content-engine`, which links to the portable skill in `skills/clip-content-engine`. For Claude Code, copy the skill folder to `~/.claude/skills/` or the project's `.claude/skills/`. The skill covers clip selection, editorial review, rendering and playback checks.
 
 For MCP-enabled agents, first install the mcp extra, then register the local stdio server:
 
