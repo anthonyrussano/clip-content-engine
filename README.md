@@ -166,6 +166,10 @@ hermes plugins enable content-engine
 
 Hermes commands are only needed if you use Hermes. Hermes deployments continue using their original work directory, unless CONTENT_ENGINE_HOME overrides it. The optional llm_model tool parameter enables local LLM scoring in the Hermes tools as well.
 
+## Posting reviewed clips to X
+
+The engine does not publish anything. Optional helpers in [`scripts/x-post/`](scripts/x-post/README.md) post an approved clip to X through a signed-in Brave profile with the Browse CLI. Each `post.sh CLIP_ID` call publishes one post, so run it only after the account owner approves the exact clip and text.
+
 ## Security and limitations
 
 - Only HTTPS YouTube hosts are accepted for transcript fetching; yt-dlp and ffmpeg run through argument arrays, not shell commands.
