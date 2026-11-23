@@ -140,6 +140,8 @@ def _handle_cut_clips(args: dict, **kw) -> str:
             out_dir=out_dir,
             segments=segments,
             subs=bool(args.get("subs", True)),
+            caption_layout=args.get("caption_layout", "standard"),
+            max_video_bitrate_kbps=args.get("max_video_bitrate_kbps"),
         )
     return _dispatch(run, "ce_cut_clips", "Failed to cut clips")
 
@@ -228,6 +230,10 @@ CUT_CLIPS_SCHEMA = {
             "out_dir": {"type": "string", "description": "Optional output directory."},
             "segments": {"type": "array", "description": "Transcript segments for subtitle timing."},
             "subs": {"type": "boolean", "description": "Burn subtitles. Default true."},
+            "caption_layout": {"type": "string", "enum": list(engine.CAPTION_LAYOUTS),
+                               "description": "Use shorts to raise and reduce portrait subtitles."},
+            "max_video_bitrate_kbps": {"type": "integer", "minimum": 1,
+                                       "description": "Optional H.264 video rate limit in kbps."},
         },
         "required": ["video_path", "clips"],
     },

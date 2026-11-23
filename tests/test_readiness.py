@@ -15,6 +15,31 @@ import engine
 import llm_ranking
 
 
+@pytest.mark.skipif(not shutil.which('ffmpeg'), reason='ffmpeg required')
+def test_cli_shorts_layout_raises_burned_captions(tmp_path, monkeypatch):
+    monkeypatch.setenv('CONTENT_ENGINE_HOME', str(tmp_path / 'output'))
+    source = tmp_path / 'black.mp4'
+    subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i',
+                    'color=c=black:s=160x240:r=12:d=1', '-pix_fmt', 'yuv420p', str(source)], check=True)
+    clips = tmp_path / 'clips.json'
+    clips.write_text(json.dumps([{'start': 0, 'end': 1, 'orientation': 'v', 'crop_x': 0.5}]))
+    transcript = tmp_path / 'transcript.json'
+    transcript.write_text(json.dumps([{'start': 0, 'duration': 1, 'text': 'Caption placement'}]))
+    parser = ce_cli.build_parser()
+    bottom_rows = []
+    for layout in ('standard', 'shorts'):
+        args = parser.parse_args(['cut', str(source), '--clips-file', str(clips),
+                                  '--transcript-file', str(transcript), '--out-dir', layout,
+                                  '--caption-layout', layout, '--max-video-bitrate-kbps', '5300'])
+        [result] = ce_cli.execute(args)
+        assert result['error'] is None
+        frame = subprocess.check_output(['ffmpeg', '-v', 'error', '-ss', '0.5', '-i', result['output'],
+                                         '-frames:v', '1', '-vf', 'scale=108:192,format=gray',
+                                         '-f', 'rawvideo', '-'])
+        bottom_rows.append(max(index // 108 for index, value in enumerate(frame) if value > 160))
+    assert bottom_rows[0] - bottom_rows[1] >= 15
+
+
 @pytest.mark.parametrize('segments', [
     [{'start': -1, 'duration': 1, 'text': 'bad'}],
     [{'start': 0, 'duration': float('nan'), 'text': 'bad'}],

@@ -116,6 +116,10 @@ def build_parser() -> argparse.ArgumentParser:
     cut.add_argument("--transcript-file")
     cut.add_argument("--out-dir")
     cut.add_argument("--no-subs", action="store_true")
+    cut.add_argument("--caption-layout", choices=engine.CAPTION_LAYOUTS, default="standard",
+                     help="Use 'shorts' to raise and reduce burned captions on portrait clips")
+    cut.add_argument("--max-video-bitrate-kbps", type=int,
+                     help="Cap the H.264 video rate in kbps. Check the final file size separately.")
     cut.add_argument("--framing", choices=engine.FRAMINGS, default="auto",
                      help="Portrait framing when a clip sets no crop_x: auto (track speakers, "
                           "fit slides and animation), track, or fit")
@@ -167,7 +171,8 @@ def execute(args: argparse.Namespace):
         return engine.cut_clips(
             args.video_path, clips, out_dir=args.out_dir,
             segments=segments, subs=not args.no_subs, default_framing=args.framing,
-            faces=args.faces,
+            faces=args.faces, caption_layout=args.caption_layout,
+            max_video_bitrate_kbps=args.max_video_bitrate_kbps,
         )
     raise ValueError("Unsupported command: " + args.command)
 

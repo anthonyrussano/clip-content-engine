@@ -110,6 +110,7 @@ def test_download_media_moves_only_the_produced_file(tmp_path, monkeypatch):
 
     def run(args, **kwargs):
         target = args[args.index('-o') + 1].replace('%(ext)s', 'm4a')
+        Path(target).with_suffix('.webm').write_text('intermediate audio')
         Path(target).write_text('new audio')
         info = {'id': 'gmEj_z17wVo', 'title': 'T', 'channel': 'C', 'duration_string': '1:00',
                 'filepath': target}
@@ -119,6 +120,28 @@ def test_download_media_moves_only_the_produced_file(tmp_path, monkeypatch):
     result = transcribe.download_media('https://youtu.be/gmEj_z17wVo', out_dir='dl', audio_only=True)
     assert Path(result['path']).read_text() == 'new audio'
     assert sorted(p.name for p in work.iterdir()) == ['audio.m4a']
+
+
+@pytest.mark.parametrize('returncode', [0, 1])
+def test_empty_replay_download_preserves_existing_source(tmp_path, monkeypatch, returncode):
+    monkeypatch.setenv('CONTENT_ENGINE_HOME', str(tmp_path))
+    monkeypatch.setattr(engine, '_ytdlp', lambda: 'yt-dlp')
+    work = tmp_path / 'replay'
+    work.mkdir()
+    source = work / 'source.mp4'
+    source.write_bytes(b'previous download')
+
+    def run(args, **kwargs):
+        stage = Path(args[args.index('-o') + 1]).parent
+        (stage / 'source.mp4').touch()
+        return SimpleNamespace(returncode=returncode, stdout='',
+                               stderr='ERROR: The downloaded file is empty' if returncode else '')
+
+    monkeypatch.setattr(transcribe.subprocess, 'run', run)
+    with pytest.raises(RuntimeError, match='listed DASH video and audio tracks'):
+        transcribe.download_media('https://www.youtube.com/live/gmEj_z17wVo', out_dir='replay')
+    assert source.read_bytes() == b'previous download'
+    assert list(work.iterdir()) == [source]
 
 
 def test_fetch_removes_captions_from_an_earlier_fetch(tmp_path, monkeypatch):

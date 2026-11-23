@@ -681,6 +681,9 @@ def _make_srt(segments: List[Dict[str, Any]], start: float, end: float, path: st
 
 
 FRAMINGS = ("auto", "track", "fit")
+CAPTION_LAYOUTS = ("standard", "shorts")
+_STANDARD_SUBTITLE_STYLE = "FontSize=20,Outline=2,Shadow=1"
+_SHORTS_SUBTITLE_STYLE = "FontSize=13,MarginV=54,MarginL=14,MarginR=25,Outline=1.5,Shadow=0.7"
 
 
 def cut_clips(
@@ -691,6 +694,8 @@ def cut_clips(
     subs: bool = True,
     default_framing: str = "auto",
     faces: str = "auto",
+    caption_layout: str = "standard",
+    max_video_bitrate_kbps: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """Cut clips from a source video with ffmpeg, burning subtitles.
 
@@ -701,10 +706,21 @@ def cut_clips(
     follows motion, and "fit" shows the whole frame over a blurred copy.
     ``faces`` "auto" uses face detection when the faces extra is installed;
     "off" plans framing from motion only.
+    ``caption_layout="shorts"`` raises and reduces burned subtitles on portrait
+    clips. ``max_video_bitrate_kbps`` limits the H.264 rate with a buffer while
+    retaining CRF encoding. The resulting file size depends on clip duration.
     """
     ffmpeg = _ffmpeg()
     if faces not in ("auto", "off"):
         raise ValueError("faces must be 'auto' or 'off'")
+    if caption_layout not in CAPTION_LAYOUTS:
+        raise ValueError("caption_layout must be 'standard' or 'shorts'")
+    rate_control: List[str] = []
+    if max_video_bitrate_kbps is not None:
+        if type(max_video_bitrate_kbps) is not int or max_video_bitrate_kbps < 1:
+            raise ValueError("max_video_bitrate_kbps must be a positive integer")
+        rate_control = ["-maxrate", f"{max_video_bitrate_kbps}k",
+                        "-bufsize", f"{max_video_bitrate_kbps * 4 // 3}k"]
     video_path = str(Path(video_path).expanduser().resolve(strict=True))
     if not clips or not isinstance(clips, list):
         raise ValueError("clips must be a nonempty array")
@@ -768,13 +784,15 @@ def cut_clips(
         sub_arg = _escape_filter_path(os.path.basename(srt))
         if subs and segments and os.path.exists(srt) and os.path.getsize(srt) > 0:
             # Fit captions to the final canvas so portrait cropping cannot cut them off.
-            graph = graph[:-3] + (f",subtitles={sub_arg}:force_style='FontSize=20,"
-                                  "PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
-                                  "Outline=2,Shadow=1'[v]")
+            style = _STANDARD_SUBTITLE_STYLE
+            if orient == "v" and caption_layout == "shorts":
+                style = _SHORTS_SUBTITLE_STYLE
+            graph = graph[:-3] + (f",subtitles={sub_arg}:force_style='{style},"
+                                  "PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000'[v]")
         cmd = [
             ffmpeg, "-y", "-ss", f"{start:.3f}", "-i", video_path, "-t", f"{dur:.3f}",
             "-filter_complex", graph, "-map", "[v]", "-map", "0:a?",
-            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "fast", "-crf", "23",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "fast", "-crf", "23", *rate_control,
             "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", out,
         ]
         r = subprocess.run(cmd, capture_output=True, text=True, cwd=out_dir)
