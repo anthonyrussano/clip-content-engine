@@ -59,6 +59,7 @@ def ce_cut_clips(
     video_path: str, clips: list[dict[str, Any]],
     transcript_path: str = "", out_dir: str = "",
     subs: bool = True, framing: str = "auto", faces: str = "auto",
+    caption_layout: str = "standard", max_video_bitrate_kbps: int | None = None,
 ) -> list[dict[str, Any]]:
     """Render selected clips from a local source video using ffmpeg.
 
@@ -66,11 +67,14 @@ def ce_cut_clips(
     "track" always follows motion, "fit" shows the whole frame. A clip's own
     crop_x (0-1) or framing key overrides it. faces="auto" follows detected
     faces when the faces extra is installed; "off" uses motion only.
+    caption_layout="shorts" raises and reduces portrait subtitles.
+    max_video_bitrate_kbps limits the H.264 video rate with a buffer.
     """
     segments = ce_api.load_segments(transcript_path) if transcript_path else None
     return engine.cut_clips(
         video_path, clips, out_dir=out_dir or None, segments=segments, subs=subs,
-        default_framing=framing, faces=faces,
+        default_framing=framing, faces=faces, caption_layout=caption_layout,
+        max_video_bitrate_kbps=max_video_bitrate_kbps,
     )
 
 

@@ -69,6 +69,11 @@ Then run:
 ./scripts/ce cut source.mp4 --clips-file clips.json --transcript-file /path/to/transcript.json
 ~~~
 
+Use `--caption-layout shorts` to raise and reduce the burned captions on portrait
+clips. To prepare for a size-limited upload, set `--max-video-bitrate-kbps` and
+measure the finished files. The cap applies to the video rate, while the file
+size also depends on duration, audio, encoder buffering and container overhead.
+
 Results are JSON on stdout. Errors go to stderr. Transcripts and mp4s are written under CONTENT_ENGINE_HOME, or the platform application-data directory by default. To choose another sandbox, set CONTENT_ENGINE_HOME=/path/to/private/workspace before running.
 
 The `run` command fetches captions and prepares clip suggestions and copy; use `cut` separately to create video files. Save the JSON result if you want to keep the suggestions. Clip text is returned in full for editorial review.

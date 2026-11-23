@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
 import subprocess
 import tempfile
 import time
@@ -29,6 +28,8 @@ AUDIO_FORMAT = ("ba[format_note*=original][protocol^=http]/ba[language^=en][prot
                 "/ba[protocol^=http]/ba/b")
 DEFAULT_WHISPER_MODEL = "small.en"
 _MEDIA_SUFFIXES = {".mp4", ".mkv", ".webm", ".m4a", ".opus", ".mp3", ".ogg", ".aac", ".wav"}
+_EMPTY_MEDIA_HINT = (" If this is a recent livestream replay, retry after YouTube finishes "
+                     "processing or download the listed DASH video and audio tracks separately.")
 
 
 def _video_format(max_height: int) -> str:
@@ -58,21 +59,31 @@ def download_media(url: str, out_dir: Optional[str] = None, audio_only: bool = F
         cmd += ["-o", os.path.join(stage, name + ".%(ext)s"), "--", url]
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         if r.returncode != 0:
-            raise RuntimeError(f"yt-dlp download failed: {r.stderr[-500:]}")
+            hint = _EMPTY_MEDIA_HINT if "downloaded file is empty" in r.stderr.lower() else ""
+            raise RuntimeError(f"yt-dlp download failed: {r.stderr[-500:].strip()}{hint}")
         lines = [l for l in r.stdout.splitlines() if l.strip().startswith("{")]
         info = json.loads(lines[-1]) if lines else {}
         files = [f for f in Path(stage).iterdir()
-                 if f.is_file() and f.name.startswith(name + ".") and f.suffix in _MEDIA_SUFFIXES]
+                 if not f.is_symlink() and f.is_file() and f.name.startswith(name + ".")
+                 and f.suffix in _MEDIA_SUFFIXES]
         if not files:
             raise RuntimeError("yt-dlp reported success but produced no media file")
-        produced = files[0]
+        reported_path = Path(info.get("filepath") or "")
+        if reported_path in files:
+            produced = reported_path
+        elif len(files) == 1:
+            produced = files[0]
+        else:
+            raise RuntimeError("yt-dlp produced multiple files without identifying the final media file")
+        if produced.stat().st_size == 0:
+            raise RuntimeError("yt-dlp produced an empty media file." + _EMPTY_MEDIA_HINT)
         dest = Path(out_dir) / produced.name
         if dest.is_symlink():
             raise ValueError("Refusing to overwrite a symlink in the work dir")
+        produced.replace(dest)
         for old in Path(out_dir).glob(name + ".*"):
-            if old.suffix in _MEDIA_SUFFIXES and old.is_file() and not old.is_symlink():
+            if old != dest and old.suffix in _MEDIA_SUFFIXES and old.is_file() and not old.is_symlink():
                 old.unlink()
-        shutil.move(str(produced), dest)
     return {
         "video_id": info.get("id") or engine.video_id(url),
         "title": info.get("title") or "",
